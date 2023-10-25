@@ -67,6 +67,9 @@ Layer ARN: "arn:aws:lambda:us-east-1:111222333444:layer:security-assistant:1"
 
 ### 3. Despliegue del Template de CloudFormation
 
+- [Código Fuente en GitHub AWS Samples](https://github.com/aws-samples/policy-security-assistant/)
+- [Plantilla CloudFormation](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml)
+
 Desplegaremos la arquitectura utilizando [Amazon CloudFormation](https://aws.amazon.com/cloudformation/). Para ello, descargaremos el siguiente [template](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml), accederemos a la Consola de AWS y en el servicio AWS CloudFormation seleccionaremos “Create Stack (with new resources)”. Luego, haremos clic en “Upload a template file“ y seleccionaremos el template [security-assistant.yaml](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml) ya descargado.
 
 En la siguiente sección pondremos un nombre a nuestro stack según sea nuestra preferencia y llenaremos los campos LambdaLayerArn y PythonRuntimeVersion con la información obtenida en el paso anterior.
