@@ -1,0 +1,525 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template Policy Security Assistant.
+
+# Author: Hernan Fernandez Retamal
+# The sample code; software libraries; command line tools; proofs of concept; templates; or other related technology (including any of the foregoing that are provided by our personnel) is provided to you as AWS Content under the AWS Customer Agreement, or the relevant written agreement between you and AWS (whichever applies). You should not use this AWS Content in your production accounts, or on production or other critical data. You are responsible for testing, securing, and optimizing the AWS Content, such as sample code, as appropriate for production grade use based on your specific quality control practices and standards. Deploying AWS Content may incur AWS charges for creating or using AWS chargeable resources, such as running Amazon EC2 instances or using Amazon S3 storage.?.
+
+Parameters:
+  LambdaLayerArn:
+    Description: "Add the boto3 Lambda Layer ARN"
+    Type: "String"
+    AllowedPattern: "arn:aws:lambda:[-a-z0-9]*:[0-9]{12}:layer:[a-zA-Z0-9-_]+:[0-9]+"
+    ConstraintDescription: "Must be a valid Lambda Layer ARN."
+
+  PythonRuntimeVersion:
+    Description: 'Python runtime version for Lambda function'
+    Type: 'String'
+    Default: 'python3.7'
+    AllowedValues:
+      - 'python3.7'
+      - 'python3.8'
+      - 'python3.9'
+      - 'python3.9'
+      - 'python3.10'
+      - 'python3.11'
+    ConstraintDescription: 'Must be a valid Python runtime version.'
+
+Resources:
+  # Front-End S3 bucket
+  SecurityAssistantBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      VersioningConfiguration:
+        Status: "Enabled"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: "logs/"
+
+  # Logging S3 Bucket
+  LoggingBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      VersioningConfiguration:
+        Status: "Enabled"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  # Bucket Policy OAI allow access to CloudFront Distribution
+  BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref SecurityAssistantBucket  
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              AWS: !Sub arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OriginAccessIdentity}
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${SecurityAssistantBucket}/*"
+
+  # CloudFront Origin
+  OriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "OAI for bucket security-assistant-${AWS::AccountId}"
+
+  # CloudFront Distribution
+  SecurityAssistantCloudFront:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !Sub ${SecurityAssistantBucket}.s3.amazonaws.com
+            Id: S3Origin
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessIdentity}
+        Enabled: 'true'
+        DefaultRootObject: 'index.html'
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ForwardedValues:
+            QueryString: 'false'
+          ViewerProtocolPolicy: 'redirect-to-https'
+        WebACLId: !GetAtt CloudFrontWAFWebAcl.Arn
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: 'TLSv1.2_2018'
+
+  # Cloudfront WebACL
+  CloudFrontWAFWebAcl:
+    Type: 'AWS::WAFv2::WebACL'
+    Properties:
+      Scope: 'CLOUDFRONT'
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: 'WAFMetric'
+      Rules:
+        - Name: 'AWSManagedRulesAmazonIpReputationList'
+          Priority: 0
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: 'AWS'
+              Name: 'AWSManagedRulesAmazonIpReputationList'
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: 'AWSManagedRulesAmazonIpReputationListMetric'
+        - Name: 'AWSManagedRulesCommonRuleSet'
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: 'AWS'
+              Name: 'AWSManagedRulesCommonRuleSet'
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: 'AWSManagedRulesCommonRuleSetMetric'
+        - Name: 'AWSManagedRulesKnownBadInputsRuleSet'
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: 'AWS'
+              Name: 'AWSManagedRulesKnownBadInputsRuleSet'
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: 'AWSManagedRulesKnownBadInputsRuleSetMetric'
+
+  # API WebACL
+  APIWAFWebAcl:
+    Type: 'AWS::WAFv2::WebACL'
+    Properties:
+      Scope: 'REGIONAL'
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: 'WAFMetric'
+      Rules:
+        - Name: 'AWSManagedRulesAmazonIpReputationList'
+          Priority: 0
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: 'AWS'
+              Name: 'AWSManagedRulesAmazonIpReputationList'
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: 'AWSManagedRulesAmazonIpReputationListMetric'
+        - Name: 'AWSManagedRulesCommonRuleSet'
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: 'AWS'
+              Name: 'AWSManagedRulesCommonRuleSet'
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: 'AWSManagedRulesCommonRuleSetMetric'
+        - Name: 'AWSManagedRulesKnownBadInputsRuleSet'
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: 'AWS'
+              Name: 'AWSManagedRulesKnownBadInputsRuleSet'
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: 'AWSManagedRulesKnownBadInputsRuleSetMetric'
+
+  #API WebACL Association
+  APIWebACLAssociation:
+    Type: "AWS::WAFv2::WebACLAssociation"
+    Properties:
+      ResourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${PolicySecurityAssistantRestApi}/stages/${ProductionStage}"
+      WebACLArn: !GetAtt APIWAFWebAcl.Arn
+
+  # Lambda Execution Role
+  BedrockPolicySecurityAssistantRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+
+  # Lambda Policy, Allow create logs in CloudWatch, X-Ray and Invoke the BedRock Claude-V2 Model
+  BedrockPolicySecurityAssistantPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "Bedrock-PolicySecurityAssistant"
+      Roles:
+        - !Ref BedrockPolicySecurityAssistantRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "logs:CreateLogGroup"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/BedrockPolicySecurityAssistant:*"
+          - Effect: "Allow"
+            Action: 
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/BedrockPolicySecurityAssistant:*"
+          - Sid: "VisualEditor0"
+            Effect: "Allow"
+            Action: "bedrock:InvokeModel"
+            Resource: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-v2"
+          - Effect: "Allow"
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: "*"
+
+  # Lambda Function Security-Assistant (Analyze Policy)
+  PolicySecurityAssistantLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: BedrockPolicySecurityAssistant
+      Handler: index.lambda_handler
+      Role: !GetAtt BedrockPolicySecurityAssistantRole.Arn
+      Runtime: !Ref PythonRuntimeVersion
+      Timeout: 35
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Layers:
+        - !Ref LambdaLayerArn
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          region = os.environ['AWS_REGION']
+          bedrock = boto3.client(service_name='bedrock-runtime',
+                                 region_name=region)
+          model_kwargs = {
+                          "max_tokens_to_sample": 300,
+                          "temperature": 0.4,
+                          "top_p": 0.9 
+                         }
+          accept = '*/*'
+          contentType = 'application/json'
+          def is_valid_json(data):
+            try:
+                json.loads(data)
+                return True
+            except json.JSONDecodeError:
+                return False
+          def lambda_handler(event, context):
+            try:
+              if not is_valid_json(event['policy']):
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({
+                        "message": "Invalid JSON."
+                    }),
+                }
+
+              if event['lang'] == 'es':
+                lang='spanish'
+              else:
+                lang='english'
+
+              prompt=f"\n\nHuman: Analyze if the IAM policy is valid, if it's not valid, don't continue. if it's valid tell me if it follows the principle of least privilege\n {event} \n answer in {lang} and provide a security rating from 1 to 10: \n\nAssistant:"
+              model_kwargs["prompt"] = prompt
+              body = json.dumps(model_kwargs)
+              modelId = 'anthropic.claude-v2'
+              response = bedrock.invoke_model(body=body, modelId=modelId, accept=accept,
+                                              contentType=contentType)
+              response_body = json.loads(response.get('body').read())
+              return_message = response_body.get('completion')
+
+              return {
+                  "statusCode": 200,
+                  "body": json.dumps({
+                      "message": return_message
+                  }),
+              }
+
+            except KeyError as e:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({
+                        "error": f"Missing key: {str(e)}"
+                    })
+                }
+
+            except Exception as e:
+                return {
+                    "statusCode": 500,
+                    "body": json.dumps({
+                        "error": f"An error occurred: {str(e)}"
+                    })
+                }
+
+  # API Gateway Invoked from Customer Browser (S3 Front-End)
+  PolicySecurityAssistantRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "PolicySecurityAssistantRestApi"
+      Description: "REST API for Policy Security Assistant"
+      FailOnWarnings: "true"
+      EndpointConfiguration:
+        Types:
+          - "EDGE"
+
+  # resource /security-assistant
+  ResourceSecurityAssistant:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref PolicySecurityAssistantRestApi
+      ParentId: !GetAtt [PolicySecurityAssistantRestApi, "RootResourceId"]
+      PathPart: "security-assistant"
+
+  # Security Assistant API Post Method
+  SecurityAssistantPostMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      RestApiId: !Ref PolicySecurityAssistantRestApi
+      ResourceId: !Ref ResourceSecurityAssistant
+      HttpMethod: "POST"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PolicySecurityAssistantLambda.Arn}/invocations"
+        IntegrationResponses: 
+          - StatusCode: '200'
+            ResponseTemplates:
+              application/json: ""
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: !Sub "'https://${SecurityAssistantCloudFront.DomainName}'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: !Sub "'https://${SecurityAssistantCloudFront.DomainName}'"
+
+  # Security Assistant API Option Method 
+  SecurityAssistantOptionsMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      RestApiId: !Ref PolicySecurityAssistantRestApi
+      ResourceId: !Ref ResourceSecurityAssistant
+      HttpMethod: "OPTIONS"
+      RequestParameters: {}
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+            method.response.header.Access-Control-Allow-Methods: "'POST'"
+            method.response.header.Access-Control-Allow-Origin: !Sub "'https://${SecurityAssistantCloudFront.DomainName}'"
+      Integration:
+        Type: "MOCK"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'https://${SecurityAssistantCloudFront.DomainName}'"
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${AWS::StackName}-ApiGateway
+      RetentionInDays: 7
+
+  # API Deployment
+  RestApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn: 
+      - SecurityAssistantPostMethod
+      - SecurityAssistantOptionsMethod
+    Properties:
+      RestApiId: !Ref PolicySecurityAssistantRestApi
+      Description: "Deployment to production stage"
+
+  # API Stage
+  ProductionStage:
+    Type: "AWS::ApiGateway::Stage"
+    Properties:
+      RestApiId: !Ref PolicySecurityAssistantRestApi
+      DeploymentId: !Ref RestApiDeployment
+      StageName: "prod"
+      TracingEnabled: true
+
+  # API Lambda Permission
+  RestApiSecurityAssistantLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref PolicySecurityAssistantLambda
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PolicySecurityAssistantRestApi}/*/*/*"
+
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Action: [ "sts:AssumeRole" ]
+            Effect: "Allow"
+            Principal: { Service: [ "lambda.amazonaws.com" ] }
+      Policies: 
+        - PolicyName: "S3AndLambdaExecutionPolicy"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Action: [ "s3:PutObject" ]
+                Effect: "Allow"
+                Resource: !Sub 'arn:aws:s3:::${SecurityAssistantBucket}/*'
+
+  # Lambda Function
+  CreateObjectLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.lambda_handler
+      Timeout: 10
+      Role: !GetAtt [ "LambdaExecutionRole", "Arn" ]
+      Environment: 
+        Variables: 
+          BUCKET_NAME: !Ref "SecurityAssistantBucket"
+          ApiGatewayURL: !Sub "https://${PolicySecurityAssistantRestApi}.execute-api.${AWS::Region}.amazonaws.com/${ProductionStage}"
+            
+      Code: 
+        ZipFile: |
+          import boto3
+          import os
+          import json
+          import cfnresponse
+
+          s3_client = boto3.client('s3')
+
+          def lambda_handler(event, context):
+              try:
+                  bucket_name = os.environ['BUCKET_NAME']
+                  api_gateway_url = os.environ['ApiGatewayURL']
+                  object_key = 'index.html'
+                  
+                  html_content = """
+          <!DOCTYPE html><html lang=en><head><meta charset=UTF-8><meta name=viewport content="width=device-width, initial-scale=1.0"><title>Security Assistant - Validate a Policy</title><meta name="author" content="Hernan Fernandez Retamal"><link href=https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css rel=stylesheet><script src=https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js></script><script src=https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js></script><style>@keyframes loadingAnimation{0%{opacity:.2}50%{opacity:1}100%{opacity:.2}}#loadingMessage span{animation:loadingAnimation 1.5s infinite}.textarea-wrapper{position:relative;width:100%;max-width:100%;margin:20px auto}</style></head><body><div class=media><div class=media-body><img src="bedrock.svg" class="rounded float-left"><h5 class=mt-0>Policy Security Assistant</h5>Demo Powered by Amazon Bedrock</div></div><br/><div class="container mt-1"><div class="content" data-lang="en"><b>Instructions:</b><br/>This web application allows users to check whether an IAM policy adheres to the principle of least privilege. Amazon Bedrock reviews and validates the policy's syntax, analyzes its adherence to the principle based on actions, resources, effects, and conditions. It then suggests improvements and assigns a score from 1 to 10, where 1 indicates low adherence and 10 indicates high adherence to the principle. <a href=https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_examples.html target=_blank>Examples of IAM policies</a><br/></div><div class="content" data-lang="es"><b>Instrucctions:</b><br/>Esta aplicación web permite a los usuarios verificar si una política IAM sigue el principio de mínimo privilegio. Amazon Bedrock revisa y valida la sintaxis de la política, analiza su adherencia al principio basándose en acciones, recursos, efectos y condiciones. Luego, sugiere mejoras y otorga un puntaje de 1 a 10, donde 1 indica bajo cumplimiento y 10 indica un alto cumplimiento del principio. <a href=https://docs.aws.amazon.com/es_es/IAM/latest/UserGuide/access_policies_examples.html target=_blank>Ejemplos de politicas IAM</a><br/></div><form id=apiForm><div class=form-group><br /><div class=textarea-wrapper><textarea class=form-control id=inputTextbox placeholder="Ingresa su politica de AWS" rows=15>
+          {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Action": "ec2:*",
+                      "Resource": "*",
+                      "Effect": "Allow",
+                      "Condition": {
+                          "StringEquals": {
+                              "ec2:Region": "us-east-2"
+                          }
+                      }
+                  }
+              ]
+          }</textarea><select class="form-select" name="lang"><option value="en">Answer in english</option><option value="es">Responde en español</option></select></div></div><div class="content" data-lang="en"><button type=submit class="btn btn-primary">Analyze IAM Policy</button></div><div class="content" data-lang="es"><button type=submit class="btn btn-primary">Analizar Política IAM</button></div></form><div class=mt-4 id=loadingMessage style=display:none><span>.....</span></div><div class=mt-4 id=responseContainer></div></div><br/><script>$(document).ready(function(){var n=navigator.language.slice(0,2);$(".content").hide(),$('.content[data-lang="'+n+'"]').length?$('.content[data-lang="'+n+'"]').show():$('.content[data-lang="en"]').show()});</script><script>const API_GATEWAY_URL="API_URL";$("#apiForm").submit(function(e){e.preventDefault();var policyText=$("#inputTextbox").val(),language=$("select[name='lang']").val(),jsonData={policy:policyText,lang:language};"API_URL".startsWith("https")?($("#loadingMessage").show(),e=$("#inputTextbox").val(),$.ajax({url:API_GATEWAY_URL,type:"POST",data:JSON.stringify(jsonData),contentType:"application/json",success:function(e){if(console.log("Respuesta recibida:",e),$("#loadingMessage").hide(),e&&e.body)try{var a=JSON.parse(e.body);if(a.message)return void $("#responseContainer").html(a.message)}catch(e){console.error("Error al parsear el campo 'body':",e)}console.error("Campo 'message' no encontrado en la respuesta.")},error:function(e,a,r){console.error("Detalles del error:",e,a,r),$("#responseContainer").html('<span class="text-danger">Error llamando al API: '+a+", reintente</span>")}})):$("#responseContainer").html('<span class="text-danger">Cambie la variable API_GATEWAY_URL en el archivo index.html</span>')});</script><br/><br/><div class="content" data-lang="es"><small>Esta solución es una demostración: El analisis automatizado de politicas debe ser considerado una sugerencia, antes de aplicar una política en su organización asegurese de validarla con un especialista en seguridad.</small></div><div class="content" data-lang="en"><small>This solution is a demonstration: The automated policy analysis should be considered a suggestion. Before implementing any policy in your organization, make sure to validate it with a security specialist</small></div></body></html>
+                  """
+
+                  html_content = html_content.replace("API_URL", api_gateway_url+"/security-assistant")
+                  bedrock_logo = """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" xmlns:v="https://vecta.io/nano"><defs><linearGradient x1="0%" y1="100%" x2="100%" y2="0%" id="A"><stop stop-color="#055f4e" offset="0%"/><stop stop-color="#56c0a7" offset="100%"/></linearGradient></defs><g fill-rule="evenodd"><path d="M0 0h64v64H0z" fill="url(#A)"/><path d="M51 31a1 1 0 1 1 0-2 1 1 0 1 1 0 2h0zM26.977 51.848l-3.203-1.746 3.741-2.245-1.03-1.714-4.747 2.848L17 46.406v-5.84l4.515-2.709-1.03-1.714L16 38.834l-4-2.4v-3.816l5.447-2.723-.894-1.79L12 30.382v-2.764l4.956-2.478L21 27.566v2.816l-3.447 1.723.894 1.79 3.556-1.778 3.554 1.76.886-1.792L23 30.38v-2.814l4.515-2.709A1 1 0 0 0 28 24v-5h-2v4.434l-4 2.4-4-2.4v-6.846l3-1.666V21h2v-7.189l3.024-1.681 4.978 2.486-.001 21.834-10.538 6.706 1.074 1.688 9.464-6.022L31 49.434l-4.023 2.414zM48 39a1 1 0 1 1 0 2 1 1 0 1 1 0-2h0zm-8 10a1 1 0 1 1 0-2 1 1 0 1 1 0 2h0zm2-33a1 1 0 1 1 0 2 1 1 0 1 1 0-2h0zm9 11c-1.302 0-2.402.839-2.816 2H33.001v-4H42a1 1 0 0 0 1-1v-4.184c1.161-.414 2-1.514 2-2.816 0-1.654-1.346-3-3-3s-3 1.346-3 3c0 1.302.839 2.402 2 2.816V23h-7.999l.001-9.002a1 1 0 0 0-.553-.894l-6.002-2.999a1 1 0 0 0-.932.021l-9 5A1 1 0 0 0 16 16v7.382l-5.447 2.723A1 1 0 0 0 10 27v10a1 1 0 0 0 .485.857L15 40.566V47a1 1 0 0 0 .521.878l11 6c.15.081.314.122.479.122a1 1 0 0 0 .515-.143l5-3A1 1 0 0 0 33 50v-7h6v2.184c-1.161.414-2 1.514-2 2.816 0 1.654 1.346 3 3 3s3-1.346 3-3c0-1.302-.839-2.402-2-2.816V42a1 1 0 0 0-1-1h-7l.001-4h10.585l1.715 1.715A2.95 2.95 0 0 0 45 40c0 1.654 1.346 3 3 3s3-1.346 3-3-1.346-3-3-3a2.95 2.95 0 0 0-1.285.301l-2.008-2.008C44.52 35.105 44.266 35 44 35H33.001v-4h15.183c.414 1.161 1.514 2 2.816 2 1.654 0 3-1.346 3-3s-1.346-3-3-3h0z" fill="#fff"/></g></svg>"""
+                  s3_client.put_object(Bucket=bucket_name,Key=object_key,Body=html_content,ContentType='text/html')
+                  s3_client.put_object(Bucket=bucket_name,Key="bedrock.svg",Body=bedrock_logo,ContentType='image/svg+xml')
+
+                  responseData = {"Message": "Operation completed successfully."}
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID")
+              except Exception as e:
+                  print(str(e))
+                  responseData = {"Error": str(e)}
+                  cfnresponse.send(event, context, cfnresponse.FAILED, responseData, "CustomResourcePhysicalID")
+      Runtime: "python3.11"
+
+  CustomResourceToInvokeLambda:
+    Type: "AWS::CloudFormation::CustomResource"
+    Properties:
+      ServiceToken: !GetAtt [ CreateObjectLambdaFunction, Arn ]
+
+Outputs:
+  ApiGatewayURL:
+    Description: "URL of the Rest API. (to be called from index.html)"
+    Value: !Sub "https://${PolicySecurityAssistantRestApi}.execute-api.${AWS::Region}.amazonaws.com/${ProductionStage}"
+
+  BucketName:
+    Description: "Name S3 Bucket hosting the website index.html"
+    Value: !Ref SecurityAssistantBucket
+
+  Website:
+    Description: "Website URL: Security Assistant: Verify that a policy adheres to the principle of least privilege"
+    Value: !Join ["", ["https://", !GetAtt SecurityAssistantCloudFront.DomainName]]
