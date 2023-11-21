@@ -2,6 +2,7 @@
 
 [Read in English](./README.md) | [Leia em Português](./README.pt.md)
 
+Parte del AWS blog [Construya un asistente de seguridad con IA Generativa de Amazon Bedrock](https://aws.amazon.com/es/blogs/aws-spanish/construya-un-asistente-de-seguridad-con-ia-generativa-de-amazon-bedrock/)
 
 [Amazon Bedrock](https://aws.amazon.com/bedrock/) es un servicio totalmente gestionado que ofrece una selección de modelos fundacionales (FM) de alto rendimiento de las principales empresas de IA, como AI21 Labs, Anthropic, Cohere, Meta, Stability AI y Amazon, a través de una sola API, junto con un amplio conjunto de capacidades que necesita para crear aplicaciones de IA generativas, lo que simplifica el desarrollo y, al mismo tiempo, mantiene la privacidad y la seguridad. Utilizando Amazon Bedrock, es posible construir un portal de autoservicio web que permita validar si una política de [AWS Identity and Access Management (IAM)](https://aws.amazon.com/iam/) cumple con el principio de mínimo privilegio, este enfoque busca agilizar el proceso de aprobación de permisos dentro de una organización sin comprometer la seguridad.
 
