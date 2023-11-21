@@ -90,3 +90,6 @@ Além disso, é possível modificar essa solução para integrá-la ao fluxo de 
 
 ## Observação
 Esta solução é uma demonstração: A análise automatizada de políticas deve ser considerada uma sugestão, antes de aplicar uma política em sua organização certifique-se de validá-la com um especialista em segurança.
+
+
+Revisor de versão em português: Nicolas Tarzia
