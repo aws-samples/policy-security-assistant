@@ -264,7 +264,7 @@ Resources:
                                  region_name=region)
           model_kwargs = {
                           "max_tokens_to_sample": 300,
-                          "temperature": 0.4,
+                          "temperature": 0.1,
                           "top_p": 0.9 
                          }
           accept = '*/*'
