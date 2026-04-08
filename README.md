@@ -63,7 +63,7 @@ The solution is deployed using [AWS CDK](https://aws.amazon.com/cdk/). Amazon Be
 
 - Python 3.13+
 - Node.js 18+
-- AWS CDK CLI (`npm install -g aws-cdk`)
+- AWS CDK CLI (`npm install -g aws-cdk@latest`)
 - AWS CLI configured with appropriate credentials
 
 ### One-time setup
