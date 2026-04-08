@@ -2,7 +2,7 @@
 
 [Leer en español](./README.es.md) | [Leia em português](./README.pt.md)
 
-[Amazon Bedrock](https://aws.amazon.com/bedrock/) is a fully managed service offering a selection of high-performance foundational models (FM) from leading AI companies, such as AI21 Labs, Anthropic, Cohere, Meta, Stability AI, and Amazon, through a single API, along with a comprehensive set of capabilities needed to create generative AI applications, simplifying development while maintaining privacy and security. Using Amazon Bedrock, it's possible to build a web self-service portal that checks whether an [AWS Identity and Access Management (IAM)](https://aws.amazon.com/iam/) policy adheres to the principle of least privilege, aiming to streamline the permission approval process within an organization without compromising security.
+[Amazon Bedrock](https://aws.amazon.com/bedrock/) is a fully managed service offering a selection of high-performance foundational models (FM) from leading AI companies through a single API, along with a comprehensive set of capabilities needed to create generative AI applications, simplifying development while maintaining privacy and security. Using Amazon Bedrock, it's possible to build a web self-service portal that checks whether an [AWS Identity and Access Management (IAM)](https://aws.amazon.com/iam/) policy adheres to the principle of least privilege, and even generate new policies from natural language descriptions — aiming to streamline the permission approval process within an organization without compromising security.
 
 Organizations are constantly evolving, developing new projects and applications. Essential for these applications to function is having the necessary permissions and access to carry out various actions on AWS services and resources. These actions are specified through [IAM policies](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html), expressed in JSON format.
 
@@ -16,73 +16,126 @@ Ensuring that permission requests adhere to the principle of least privilege fro
 
 ## Web Self-Service Portal
 
-The following application is a Web self-service portal, allowing users to check if the IAM policy adheres to the best practices of the principle of least privilege. In this instance, Amazon Bedrock will analyze the inputted policy, validate its syntax, and assess its compliance based on specificity of actions, resource restrictions, effects, and conditions. It will then highlight potential areas for policy improvement and provide a compliance score on a scale of 1 to 10. On this scale, 1 represents low adherence to the principle of least privilege, while 10 indicates high adherence.
+The application is a web self-service portal with two main features:
 
-![website](./images/website.png)
+### Analyze Policy
+
+Users can paste an IAM policy in JSON format and receive a detailed analysis. Amazon Bedrock (Claude Sonnet 4.5) validates the policy's syntax, assesses its compliance with the principle of least privilege based on specificity of actions, resource restrictions, effects, and conditions, highlights potential areas for improvement, and provides a compliance score on a scale of 1 to 10. Additionally, [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html) validates the policy to surface syntax errors, security warnings, and best-practice suggestions.
+
+After the initial analysis, users can continue the conversation — asking the assistant to fix specific issues, add conditions, restrict resources, or generate an improved version of the policy.
+
+### Generate Policy
+
+Users can describe the permissions they need in natural language, and the assistant generates a least-privilege IAM policy. If the request is too broad (e.g., "full access to EC2"), the assistant asks for more specific details instead of generating an unsafe policy. Users can refine the policy through conversation — for example, asking to restrict to a specific region, add tag-based conditions, or include additional permissions.
+
+Generated policies are automatically validated by IAM Access Analyzer before being returned to the user.
+
+![website](./images/security-assistant.gif)
 
 ## Architecture
+
 The following architecture diagram describes how the self-service portal operates.
 
 ![architecture_diagram](./images/architecture_diagram.png)
 
-The self-service portal comprises a distribution of [Amazon CloudFront (1)](https://aws.amazon.com/cloudfront/), which distributes a web form stored in an [Amazon S3](https://aws.amazon.com/s3/) bucket.
+The self-service portal uses [Amazon CloudFront](https://aws.amazon.com/cloudfront/) (1) as the single entry point, serving both the React frontend from an [Amazon S3](https://aws.amazon.com/s3/) bucket (2) and proxying API calls to [Amazon API Gateway](https://aws.amazon.com/api-gateway/) (3). CloudFront adds a secret origin header to API requests, ensuring that only requests through CloudFront reach the backend.
 
-Users enter the IAM policy into the web form, which communicates with the [Amazon API Gateway](https://aws.amazon.com/api-gateway/) (3) service using the [AWS SDK for Javascript](https://aws.amazon.com/sdk-for-javascript/).
+API Gateway invokes [AWS Lambda](https://aws.amazon.com/lambda/) functions (4), which send the policy to [Amazon Bedrock](https://aws.amazon.com/bedrock/) (5) for analysis or generation using Claude Sonnet 4.5, and to [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html) (6) for ground-truth policy validation. All requests are logged to [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) (7) for audit purposes.
 
-Amazon API Gateway invokes the AWS Lambda function, which sends the policy to Amazon Bedrock, asking it to evaluate its syntax and adherence to the principle of least privilege, and provide a score between 1 to 10 based on its level of compliance.
+Both CloudFront and API Gateway are protected by [AWS WAFv2](https://aws.amazon.com/waf/) with managed rule groups for IP reputation, common exploits, and known bad inputs.
+
+## Security
+
+- The API Gateway is not directly exposed to the internet — all traffic flows through CloudFront, which adds a secret origin verification header. Lambda functions reject requests without this header.
+- [AWS WAFv2](https://aws.amazon.com/waf/) protects both CloudFront and API Gateway with three AWS managed rule groups: IP reputation list, common rule set, and known bad inputs.
+- All traffic is encrypted in transit (HTTPS enforced, TLS 1.2 minimum).
+- S3 buckets have public access fully blocked; access is only through CloudFront Origin Access Control (OAC).
+- Lambda execution roles follow least privilege — scoped to specific Bedrock model ARNs and DynamoDB table.
+- API Gateway has a usage plan with rate limiting (10 req/s) and daily quota (1,000 requests).
+- All requests are logged to DynamoDB for audit trail and to CloudWatch for observability.
+- X-Ray tracing is enabled on Lambda and API Gateway.
 
 ## Implementation Guide
 
-The solution is implemented in three parts,
+The solution is deployed using [AWS CDK](https://aws.amazon.com/cdk/). Amazon Bedrock models are [automatically accessible](https://aws.amazon.com/blogs/security/simplified-amazon-bedrock-model-access/) — no manual enablement is required.
 
-1. Enable Amazon Bedrock on the AWS console.
-2. Creation of Lambda Layer.
-3. Deployment of the architecture via CloudFormation.
+### Prerequisites
 
-### 1. Enable Amazon Bedrock
+- Python 3.13+
+- Node.js 18+
+- AWS CDK CLI (`npm install -g aws-cdk`)
+- AWS CLI configured with appropriate credentials
 
-Open the Amazon Bedrock console. In the left menu, select “Model access”, click the "Edit" button and enable the Anthropic > Claude model, then save the changes.
+### One-time setup
 
-Remember, as of the date this article was published, Amazon Bedrock is available in the following AWS regions: US West (Oregon), Asia Pacific (Tokyo), Asia Pacific (Singapore), US East (N. Virginia).
-
-### 2. Creation of Lambda Layer
-
-For interaction between Lambda and Bedrock, we will need version 1.28.57 or higher of the [AWS Software Development Kit for Python (Boto3)](https://aws.amazon.com/sdk-for-python/). For this, we must create a Lambda layer in an environment with Python version 3.7 or higher. If we don't have such an environment, we can use the [AWS CloudShell](https://aws.amazon.com/cloudshell/) console.
-
-To access Amazon CloudShell, log into the AWS Console. In the navigation bar, select the CloudShell service icon or type CloudShell in the search bar. A console will open in the browser, where you can run the following command.
-
+```bash
+git clone https://github.com/aws-samples/policy-security-assistant.git
+cd policy-security-assistant
+npm install --prefix frontend
+python -m venv cdk/.venv
+source cdk/.venv/bin/activate
+pip install -r cdk/requirements.txt
+cdk bootstrap --app "python cdk/app.py"
 ```
-curl -sSL https://raw.githubusercontent.com/aws-samples/policy-security-assistant/master/create-layer.sh | sh
+
+### Build and deploy
+
+```bash
+npm run build --prefix frontend
+cdk deploy --app "python cdk/app.py"
 ```
 
-This script will set up a Python 3 environment with version 1.28.61 of boto3, package the environment into the boto3-layer.zip file, and publish it as a Lambda Layer via the AWS CLI. The Layer ARN and Python version will be displayed at the end of the script and will be used during the CloudFormation template deployment.
+The CDK stack creates all the resources defined in the architecture. Once the deployment is completed, the CloudFront website URL will be displayed in the outputs. Open the link to access the security assistant.
 
-The script's output will look something like this. It's essential to note this information for the next step.
+No additional configuration is needed — CloudFront serves both the frontend and the API, so there are no API URLs or keys to configure manually.
 
-Python Version: 3.10
-Layer ARN: "arn:aws:lambda:us-east-1:111222333444:layer:security-assistant:1"
+### Redeploying after changes
 
-### 3. Deployment of the CloudFormation Template
+- Lambda-only changes: `cdk deploy --app "python cdk/app.py"`
+- Frontend changes: `npm run build --prefix frontend` then `cdk deploy --app "python cdk/app.py"`
+- Infrastructure changes: `cdk diff --app "python cdk/app.py"` to preview, then `cdk deploy --app "python cdk/app.py"`
 
-- [Source Code in AWS Samples GitHub](https://github.com/aws-samples/policy-security-assistant/)
-- [Cloudformation Template](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml)
+## Running Tests
 
+```bash
+pip install -r backend/requirements-test.txt
+python -m pytest backend/tests/ -v
+```
 
-We will deploy the architecture using [Amazon CloudFormation](https://aws.amazon.com/cloudformation/). To do this, download the following [template](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml), access the AWS Console and in the AWS CloudFormation service, select “Create Stack (with new resources)”. Then, click on “Upload a template file” and choose the already downloaded [security-assistant.yaml](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml) template.
+## Cost Considerations
 
-In the next section, we will name our stack according to our preference and fill in the LambdaLayerArn and PythonRuntimeVersion fields with the information obtained in the previous step.
+This solution uses several AWS services that may incur costs:
 
-![cloudformation](./images/cloudformation.png)
+- **Amazon Bedrock** — Charged per input/output token. Claude Sonnet 4.5 pricing applies. Each policy analysis or generation typically uses 1,000–3,000 tokens. See [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+- **AWS Lambda** — Charged per request and compute duration. The free tier includes 1 million requests/month.
+- **Amazon DynamoDB** — On-demand pricing for audit trail writes. Minimal cost for typical usage.
+- **Amazon CloudFront** — Charged per request and data transfer. The free tier includes 1 TB/month.
+- **AWS WAFv2** — Charged per web ACL, per rule, and per million requests inspected.
+- **IAM Access Analyzer** — `ValidatePolicy` API calls are free.
 
-The CloudFormation stack will create the resources defined in the architecture. Once the stack creation is completed, in the Output section, we will find the API Gateway website URL and the S3 Bucket name. By opening the website link, we can access the security assistant.
+For a demo or low-traffic internal tool, expect costs under $5/month excluding Bedrock usage. Bedrock costs depend on the volume of policy analyses and generations.
 
-![cloudformation_output](./images/cloudformation_output.png)
+## Cleanup
+
+To remove all resources and stop incurring costs:
+
+```bash
+cdk destroy --app "python cdk/app.py"
+```
+
+This will delete all resources created by the stack. Note that the DynamoDB audit table and the S3 logging bucket have `RemovalPolicy.RETAIN` and will not be deleted automatically — remove them manually from the AWS console if no longer needed.
 
 ## Conclusion
 
-Using Amazon Bedrock, it's possible to construct a self-service portal to assess if an Amazon IAM policy adheres to the principle of least privilege. This will speed up interactions between the security and application development areas.
+Using Amazon Bedrock and IAM Access Analyzer, it's possible to construct a self-service portal to assess if an Amazon IAM policy adheres to the principle of least privilege, and to generate new policies from natural language descriptions. The conversational interface allows users to iteratively refine policies until they meet security requirements, speeding up interactions between the security and application development areas.
 
 Additionally, it's possible to modify this solution to integrate it into your organization's permission request workflow, for example, to automatically reject requests that don't meet a minimum compliance score. This will reduce the security team's backlog, leaving human interaction only for requests that comply with best practices.
 
 ## Note
-This solution is a demonstration: The automated policy analysis should be considered a suggestion. Before implementing any policy in your organization, make sure to validate it with a security specialist
+
+This solution is a demonstration: The automated policy analysis and generation should be considered a suggestion. Before implementing any policy in your organization, make sure to validate it with a security specialist.
+
+
+---
+
+Author: Hernan Fernandez Retamal

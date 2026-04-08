@@ -1,8 +1,8 @@
-# Crie um assistente de segurança com IA generativa do Amazon Bedrock
+# Crie um assistente de segurança com IA generativa do Amazon Bedrock e AWS
 
-[Read in English](./README.md) | [Leer en Español](./README.es.md)
+[Read in English](./README.md) | [Leer en español](./README.es.md)
 
-O [Amazon Bedrock](https://aws.amazon.com/bedrock/) é um serviço totalmente gerenciado que oferece uma seleção de modelos básicos (FM) de alto desempenho das principais empresas de IA, como AI21 Labs, Anthropic, Cohere, Meta, Stability AI e Amazon, por meio de uma única API, junto com um amplo conjunto de recursos necessários para criar aplicativos de IA generativos, simplificando o desenvolvimento e mantendo a privacidade e a segurança. Usando o Amazon Bedrock, é possível criar um portal web de autoatendimento que permite validar se uma política do [AWS Identity and Access Management (IAM)](https://aws.amazon.com/iam/) está em conformidade com o princípio do menor privilégio. Essa abordagem busca agilizar o processo de aprovação de permissões dentro de uma organização sem comprometer a segurança.
+O [Amazon Bedrock](https://aws.amazon.com/bedrock/) é um serviço totalmente gerenciado que oferece uma seleção de modelos básicos (FM) de alto desempenho das principais empresas de IA por meio de uma única API, junto com um amplo conjunto de recursos necessários para criar aplicativos de IA generativos, simplificando o desenvolvimento e mantendo a privacidade e a segurança. Usando o Amazon Bedrock, é possível criar um portal web de autoatendimento que permite validar se uma política do [AWS Identity and Access Management (IAM)](https://aws.amazon.com/iam/) está em conformidade com o princípio do menor privilégio, e até gerar novas políticas a partir de descrições em linguagem natural — buscando agilizar o processo de aprovação de permissões dentro de uma organização sem comprometer a segurança.
 
 As organizações estão em constante evolução desenvolvendo novos projetos e aplicativos. Uma parte essencial da operação desses aplicativos é que eles tenham permissões e acesso para realizar ações diferentes nos serviços e recursos da AWS. Essas ações são especificadas por meio de [políticas do IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html), que são expressas no formato JSON.
 
@@ -14,82 +14,128 @@ As equipes que possuem aplicativos fazem uma ou mais interações com a área de
 
 Fazer com que as solicitações de permissão estejam em conformidade com o princípio do menor privilégio desde a primeira solicitação acelera o processo de aprovação, reduz os gargalos e reduz a frustração do usuário.
 
-## Portal de autoatendimento
+## Portal de Autoatendimento Web
 
-O próximo aplicativo é um portal Web de autoatendimento, que permite aos usuários analisar se a política do IAM está em conformidade com as melhores práticas do princípio do menor privilégio. Nesse caso, o Amazon Bedrock analisará a política inserida e validará a sintaxe. Além disso, analisará a conformidade com o princípio do menor privilégio com base na especificidade das ações, restrição de recursos, efeitos e condições. Em seguida, ele explicará possíveis pontos de melhoria na política e fornecerá uma pontuação de conformidade em uma escala de 1 a 10. É nessa escala que 1 representa uma baixa conformidade com o princípio do menor privilégio e 10 corresponde a uma alta conformidade com ele.
+O aplicativo é um portal web de autoatendimento com duas funcionalidades principais:
 
-![website](./images/website.pt.png)
+### Analisar Política
+
+Os usuários podem colar uma política IAM em formato JSON e receber uma análise detalhada. O Amazon Bedrock (Claude Sonnet 4.5) valida a sintaxe da política, avalia sua conformidade com o princípio do menor privilégio com base na especificidade das ações, restrição de recursos, efeitos e condições, destaca pontos de melhoria potenciais e fornece uma pontuação de conformidade em uma escala de 1 a 10. Além disso, o [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html) valida a política para detectar erros de sintaxe, avisos de segurança e sugestões de boas práticas.
+
+Após a análise inicial, os usuários podem continuar a conversa — pedindo ao assistente que corrija problemas específicos, adicione condições, restrinja recursos ou gere uma versão melhorada da política.
+
+### Gerar Política
+
+Os usuários podem descrever as permissões que precisam em linguagem natural, e o assistente gera uma política IAM seguindo o princípio do menor privilégio. Se a solicitação for muito ampla (ex., "acesso total ao EC2"), o assistente solicita detalhes mais específicos em vez de gerar uma política insegura. Os usuários podem refinar a política através da conversa — por exemplo, pedindo para restringir a uma região específica, adicionar condições baseadas em tags ou incluir permissões adicionais.
+
+As políticas geradas são validadas automaticamente pelo IAM Access Analyzer antes de serem entregues ao usuário.
+
+![website](./images/security-assistant.gif)
 
 ## Arquitetura
+
 O diagrama de arquitetura a seguir descreve como o portal de autoatendimento funciona.
 
 ![architecture_diagram](./images/architecture_diagram.png)
 
-O portal de autoatendimento consiste em uma distribuição do Amazon CloudFront (1)](https://aws.amazon.com/cloudfront/); ela distribui um formulário web que é armazenado em um bucket do [Amazon S3](https://aws.amazon.com/s3/).
+O portal de autoatendimento utiliza o [Amazon CloudFront](https://aws.amazon.com/cloudfront/) (1) como ponto de entrada único, servindo tanto o frontend React de um bucket do [Amazon S3](https://aws.amazon.com/s3/) (2) quanto atuando como proxy para as chamadas API ao [Amazon API Gateway](https://aws.amazon.com/api-gateway/) (3). O CloudFront adiciona um header secreto de origem às solicitações API, garantindo que apenas solicitações através do CloudFront cheguem ao backend.
 
-O usuário insere a política do IAM no formulário web, que se comunica com o serviço [Amazon API Gateway](https://aws.amazon.com/api-gateway/) (3) usando o [AWS SDK para Javascript](https://aws.amazon.com/sdk-for-javascript/).
+O API Gateway invoca as funções [AWS Lambda](https://aws.amazon.com/lambda/) (4), que enviam a política ao [Amazon Bedrock](https://aws.amazon.com/bedrock/) (5) para análise ou geração usando Claude Sonnet 4.5, e ao [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html) (6) para validação verificada da política. Todas as solicitações são registradas no [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) (7) para fins de auditoria.
 
-O Amazon API Gateway invoca a função AWS Lambda, que envia a política ao Amazon Bedrock e solicita que ele avalie sua sintaxe, princípio de privilégio mínimo, e forneça uma pontuação de 1 a 10, dependendo do nível de conformidade.
+Tanto o CloudFront quanto o API Gateway são protegidos pelo [AWS WAFv2](https://aws.amazon.com/waf/) com grupos de regras gerenciadas para reputação de IP, exploits comuns e inputs maliciosos conhecidos.
 
-## Guia de implementação
+## Segurança
 
-A solução é implementada em três partes,
+- O API Gateway não está exposto diretamente à internet — todo o tráfego flui através do CloudFront, que adiciona um header secreto de verificação de origem. As funções Lambda rejeitam solicitações sem este header.
+- [AWS WAFv2](https://aws.amazon.com/waf/) protege tanto o CloudFront quanto o API Gateway com três grupos de regras gerenciadas da AWS: lista de reputação de IP, conjunto de regras comuns e inputs maliciosos conhecidos.
+- Todo o tráfego é criptografado em trânsito (HTTPS obrigatório, TLS 1.2 mínimo).
+- Os buckets S3 têm o acesso público completamente bloqueado; o acesso é apenas através do CloudFront Origin Access Control (OAC).
+- Os roles de execução do Lambda seguem o princípio do menor privilégio — limitados a ARNs específicos do modelo Bedrock e da tabela DynamoDB.
+- O API Gateway tem um plano de uso com limitação de taxa (10 req/s) e cota diária (1.000 solicitações).
+- Todas as solicitações são registradas no DynamoDB para auditoria e no CloudWatch para observabilidade.
+- O rastreamento X-Ray está habilitado no Lambda e API Gateway.
 
-1. Ative o Amazon Bedrock no console da AWS
-1. Criando a camada Lambda
-1. Implantação da arquitetura via CloudFormation
+## Guia de Implementação
 
+A solução é implantada usando [AWS CDK](https://aws.amazon.com/cdk/). Os modelos do Amazon Bedrock são [acessíveis automaticamente](https://aws.amazon.com/blogs/security/simplified-amazon-bedrock-model-access/) — nenhuma habilitação manual é necessária.
 
-### 1. Ativar o Amazon Bedrock
+### Pré-requisitos
 
+- Python 3.13+
+- Node.js 18+
+- AWS CDK CLI (`npm install -g aws-cdk`)
+- AWS CLI configurado com as credenciais apropriadas
 
-Abra o console [Amazon Bedrock](https://aws.amazon.com/bedrock/). No menu à esquerda, selecione [“Acesso ao modelo”](https://us-east-1.console.aws.amazon.com/bedrock/home?region=us-east-1#modelaccess), selecione o botão “Editar” e ative o modelo Anthropic > Claude e salve as alterações.
+### Configuração inicial (apenas uma vez)
 
-Lembre-se de que, na data de publicação deste artigo: o Amazon Bedrock está disponível nas seguintes regiões da AWS: Oeste dos EUA (Oregon), Ásia-Pacífico (Tóquio), Ásia-Pacífico (Cingapura), Leste dos EUA (Norte da Virgínia).
-
-### 2. Criando a camada Lambda
-
-Para a interação entre o Lambda e o Bedrock, precisaremos da versão 1.28.57 ou superior do [AWS Software Development Kit para Python (Boto3)](https://aws.amazon.com/sdk-for-python/). Para isso, precisamos criar uma Lambda Layer em um ambiente que tenha a versão 3.7 ou superior do Python. Se você não tiver um ambiente com Python 3.7 ou superior, poderá usar o console do [AWS CloudShell](https://aws.amazon.com/cloudshell/). 
-
-Para fazer login no Amazon CloudShell, faça login no console da AWS. Na barra de navegação, selecione o ícone do serviço CloudShell ou, na barra de pesquisa, digite CloudShell. Um console será aberto no navegador, onde você poderá executar o seguinte comando.
-
+```bash
+git clone https://github.com/aws-samples/policy-security-assistant.git
+cd policy-security-assistant
+npm install --prefix frontend
+python -m venv cdk/.venv
+source cdk/.venv/bin/activate
+pip install -r cdk/requirements.txt
+cdk bootstrap --app "python cdk/app.py"
 ```
-curl -sSL https://raw.githubusercontent.com/aws-samples/policy-security-assistant/master/create-layer.sh | sh
+
+### Compilar e implantar
+
+```bash
+npm run build --prefix frontend
+cdk deploy --app "python cdk/app.py"
 ```
 
-Esse script criará um ambiente Python 3 com a versão 1.28.61 do boto3, empacotará o ambiente com o arquivo [boto3-layer.zip](https://console.aws.amazon.com/lambda/home?region=us-east-1#/layers/security-assistant/) e, via AWS CLI, o publicará como Layer Lambda. As versões Layer ARN e Python serão exibidas no final do script e serão usadas durante a implantação do modelo do CloudFormation.
+A stack do CDK criará os recursos definidos na arquitetura. Quando a implantação estiver concluída, a URL do site CloudFront será exibida nos outputs. Abra o link para acessar o assistente de segurança.
 
-A saída do script fornecerá informações semelhantes às seguintes. É necessário anotar essas informações, pois as usaremos na próxima etapa.
+Nenhuma configuração adicional é necessária — o CloudFront serve tanto o frontend quanto a API, então não há URLs de API nem chaves para configurar manualmente.
 
+### Reimplantar após alterações
+
+- Alterações apenas no Lambda: `cdk deploy --app "python cdk/app.py"`
+- Alterações no frontend: `npm run build --prefix frontend` e depois `cdk deploy --app "python cdk/app.py"`
+- Alterações na infraestrutura: `cdk diff --app "python cdk/app.py"` para visualizar, depois `cdk deploy --app "python cdk/app.py"`
+
+## Executar Testes
+
+```bash
+pip install -r backend/requirements-test.txt
+python -m pytest backend/tests/ -v
 ```
-Python Version: 3.10
-Layer ARN: "arn:aws:lambda:us-east-1:111222333444:layer:security-assistant:1"
+
+## Considerações de Custos
+
+Esta solução utiliza vários serviços da AWS que podem gerar custos:
+
+- **Amazon Bedrock** — Cobrado por token de entrada/saída. Aplica-se o preço do Claude Sonnet 4.5. Cada análise ou geração de política utiliza tipicamente entre 1.000 e 3.000 tokens. Veja [preços do Amazon Bedrock](https://aws.amazon.com/bedrock/pricing/).
+- **AWS Lambda** — Cobrado por solicitação e duração de computação. O nível gratuito inclui 1 milhão de solicitações/mês.
+- **Amazon DynamoDB** — Preço sob demanda para escritas do registro de auditoria. Custo mínimo para uso típico.
+- **Amazon CloudFront** — Cobrado por solicitação e transferência de dados. O nível gratuito inclui 1 TB/mês.
+- **AWS WAFv2** — Cobrado por web ACL, por regra e por milhão de solicitações inspecionadas.
+- **IAM Access Analyzer** — As chamadas à API `ValidatePolicy` são gratuitas.
+
+Para uma demonstração ou ferramenta interna de baixo tráfego, espere custos inferiores a $5/mês excluindo o uso do Bedrock. Os custos do Bedrock dependem do volume de análises e gerações de políticas.
+
+## Limpeza
+
+Para remover todos os recursos e parar de incorrer em custos:
+
+```bash
+cdk destroy --app "python cdk/app.py"
 ```
 
-### 3. Implantação do modelo CloudFormation
-
-- [Repositório GitHub](https://github.com/aws-samples/policy-security-assistant/)
-- [Criar camada create-layer.sh](https://github.com/aws-samples/policy-security-assistant/blob/main/create-layer.sh)
-- [Modelo do CloudFormation](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml)
-
-Implantaremos a arquitetura usando o Amazon CloudFormation](https://aws.amazon.com/cloudformation/). Para fazer isso, baixaremos o [modelo](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml) a seguir, acessaremos o console da AWS e, no serviço AWS CloudFormation, selecionaremos “Create Stack (with new resources)”. Em seguida, clicaremos em “Carregar um arquivo de modelo” e selecionaremos o modelo [security-assistant.yaml](https://github.com/aws-samples/policy-security-assistant/blob/main/security-assistant.yaml) que já foi baixado.
-
-En la siguiente sección pondremos un nombre a nuestro stack según sea nuestra preferencia y llenaremos los campos LambdaLayerArn y PythonRuntimeVersion con la información obtenida en el paso anterior.
-
-![cloudformation](./images/cloudformation.pt.png)
-
-A pilha do CloudFormation criará os recursos definidos na arquitetura. Quando a criação da pilha estiver concluída, na seção Saída, encontraremos o URL do API Gateway do site e o nome do S3 Bucket. Ao abrir o link do site, podemos acessar o assistente de segurança.
-
-![cloudformation_output](./images/cloudformation_output.pt.png)
+Isso excluirá todos os recursos criados pela stack. Observe que a tabela de auditoria do DynamoDB e o bucket de logs do S3 têm `RemovalPolicy.RETAIN` e não serão excluídos automaticamente — remova-os manualmente do console da AWS se não forem mais necessários.
 
 ## Conclusão
 
-Usando o Amazon Bedrock, é possível criar um portal de autoatendimento para avaliar se uma política do Amazon IAM está em conformidade com o princípio do menor privilégio. Com isso, vamos agilizar a interação entre a área de segurança e o desenvolvimento de aplicativos.
+Usando o Amazon Bedrock e o IAM Access Analyzer, é possível criar um portal de autoatendimento para avaliar se uma política do Amazon IAM está em conformidade com o princípio do menor privilégio, e para gerar novas políticas a partir de descrições em linguagem natural. A interface conversacional permite que os usuários refinem as políticas iterativamente até que atendam aos requisitos de segurança, agilizando a interação entre a área de segurança e o desenvolvimento de aplicativos.
 
-Além disso, é possível modificar essa solução para integrá-la ao fluxo de solicitações de permissão da sua organização, por exemplo, para rejeitar automaticamente solicitações que não atendam a uma pontuação mínima de conformidade, isso reduzirá a lista de tarefas na área de segurança, deixando a interação humana apenas para solicitações que atendam às boas práticas.
+Além disso, é possível modificar essa solução para integrá-la ao fluxo de solicitações de permissão da sua organização, por exemplo, para rejeitar automaticamente solicitações que não atendam a uma pontuação mínima de conformidade. Isso reduzirá a lista de tarefas na área de segurança, deixando a interação humana apenas para solicitações que atendam às boas práticas.
 
 ## Observação
-Esta solução é uma demonstração: A análise automatizada de políticas deve ser considerada uma sugestão, antes de aplicar uma política em sua organização certifique-se de validá-la com um especialista em segurança.
+
+Esta solução é uma demonstração: A análise e geração automatizada de políticas deve ser considerada uma sugestão. Antes de implementar qualquer política em sua organização, certifique-se de validá-la com um especialista em segurança.
 
 
-Revisor de versão em português: Nicolas Tarzia
+---
+
+Autor: Hernan Fernandez Retamal

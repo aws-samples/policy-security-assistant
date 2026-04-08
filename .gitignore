@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+
+# Python
+cdk/.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+backend/.pytest_cache/
+
+# CDK
+cdk.out/
+cdk/cdk.out/
+
+# Environment
+.env
+.env.local
+frontend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
