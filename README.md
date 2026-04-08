@@ -75,13 +75,13 @@ npm install --prefix frontend
 python -m venv cdk/.venv
 source cdk/.venv/bin/activate
 pip install -r cdk/requirements.txt
-cdk bootstrap --app "python cdk/app.py"
 ```
 
 ### Build and deploy
 
 ```bash
 npm run build --prefix frontend
+cdk bootstrap --app "python cdk/app.py"  # only needed on first deploy
 cdk deploy --app "python cdk/app.py"
 ```
 
