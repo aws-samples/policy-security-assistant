@@ -4,7 +4,6 @@ Author: Hernan Fernandez Retamal
 """
 
 import os
-import secrets
 
 import aws_cdk as cdk
 from aws_cdk import (
@@ -23,17 +22,32 @@ from aws_cdk import (
     aws_wafv2 as wafv2,
     aws_logs as logs,
     aws_cloudwatch as cw,
+    aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
 
-# Secret header value to verify requests come through CloudFront
+# Header name used to verify requests come through CloudFront.
+# The secret value is stored in Secrets Manager (see stack init).
 ORIGIN_VERIFY_HEADER = "x-origin-verify"
-ORIGIN_VERIFY_SECRET = secrets.token_hex(32)
 
 
 class SecurityAssistantStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # ── Origin verify secret (stable across deploys) ──
+        # Stored in Secrets Manager so the value is generated once and reused
+        # on subsequent deploys. Lambda reads it at runtime.
+        origin_secret = secretsmanager.Secret(
+            self, "OriginVerifySecret",
+            description="Origin verification secret for CloudFront -> API Gateway",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                exclude_punctuation=True,
+                password_length=64,
+            ),
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        origin_secret_value = origin_secret.secret_value.unsafe_unwrap()
 
         # ── DynamoDB Audit Table ──
         audit_table = dynamodb.Table(
@@ -63,7 +77,7 @@ class SecurityAssistantStack(Stack):
                 "MODEL_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                 "BEDROCK_REGION": "us-east-1",
                 "ORIGIN_VERIFY_HEADER": ORIGIN_VERIFY_HEADER,
-                "ORIGIN_VERIFY_SECRET": ORIGIN_VERIFY_SECRET,
+                "ORIGIN_VERIFY_SECRET": origin_secret_value,
             },
             log_group=logs.LogGroup(
                 self, "AnalyzePolicyLogGroup",
@@ -99,7 +113,7 @@ class SecurityAssistantStack(Stack):
                 "MODEL_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                 "BEDROCK_REGION": "us-east-1",
                 "ORIGIN_VERIFY_HEADER": ORIGIN_VERIFY_HEADER,
-                "ORIGIN_VERIFY_SECRET": ORIGIN_VERIFY_SECRET,
+                "ORIGIN_VERIFY_SECRET": origin_secret_value,
             },
             log_group=logs.LogGroup(
                 self, "GeneratePolicyLogGroup",
@@ -200,7 +214,7 @@ class SecurityAssistantStack(Stack):
         api_origin = origins.HttpOrigin(
             f"{api.rest_api_id}.execute-api.{Stack.of(self).region}.amazonaws.com",
             origin_path="/prod",
-            custom_headers={ORIGIN_VERIFY_HEADER: ORIGIN_VERIFY_SECRET},
+            custom_headers={ORIGIN_VERIFY_HEADER: origin_secret_value},
             protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
         )
 
