@@ -78,6 +78,8 @@ class SecurityAssistantStack(Stack):
                 "BEDROCK_REGION": "us-east-1",
                 "ORIGIN_VERIFY_HEADER": ORIGIN_VERIFY_HEADER,
                 "ORIGIN_VERIFY_SECRET": origin_secret_value,
+                # ALLOWED_ORIGIN is set via add_environment after the CloudFront
+                # distribution is created (circular dependency workaround).
             },
             log_group=logs.LogGroup(
                 self, "AnalyzePolicyLogGroup",
@@ -257,6 +259,11 @@ class SecurityAssistantStack(Stack):
             distribution=distribution,
             distribution_paths=["/*"],
         )
+
+        # Set ALLOWED_ORIGIN env var on Lambdas now that the CloudFront domain is known
+        allowed_origin = f"https://{distribution.distribution_domain_name}"
+        analyze_fn.add_environment("ALLOWED_ORIGIN", allowed_origin)
+        generate_fn.add_environment("ALLOWED_ORIGIN", allowed_origin)
 
         # ── API WAF ──
         api_waf = self._create_waf_web_acl("ApiWAF", "REGIONAL")
