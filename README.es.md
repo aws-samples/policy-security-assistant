@@ -81,8 +81,8 @@ pip install -r cdk/requirements.txt
 
 ```bash
 npm run build --prefix frontend
-cdk bootstrap --app "python cdk/app.py"  # solo necesario en el primer despliegue
-cdk deploy --app "python cdk/app.py"
+cdk bootstrap --app "python cdk/app.py" [--profile profilename]  # solo necesario en el primer despliegue
+cdk deploy --app "python cdk/app.py" [--profile profilename]
 ```
 
 El stack de CDK creará los recursos definidos en la arquitectura. Una vez finalizado el despliegue, la URL del sitio web de CloudFront se mostrará en los outputs. Abra el enlace para acceder al asistente de seguridad.
@@ -91,9 +91,9 @@ No se necesita configuración adicional — CloudFront sirve tanto el frontend c
 
 ### Redesplegar después de cambios
 
-- Cambios solo en Lambda: `cdk deploy --app "python cdk/app.py"`
-- Cambios en el frontend: `npm run build --prefix frontend` y luego `cdk deploy --app "python cdk/app.py"`
-- Cambios en infraestructura: `cdk diff --app "python cdk/app.py"` para previsualizar, luego `cdk deploy --app "python cdk/app.py"`
+- Cambios solo en Lambda: `cdk deploy --app "python cdk/app.py" [--profile profilename]`
+- Cambios en el frontend: `npm run build --prefix frontend` y luego `cdk deploy --app "python cdk/app.py" [--profile profilename]`
+- Cambios en infraestructura: `cdk diff --app "python cdk/app.py" [--profile profilename]` para previsualizar, luego `cdk deploy --app "python cdk/app.py" [--profile profilename]`
 
 ## Ejecutar Tests
 
@@ -120,7 +120,7 @@ Para una demostración o herramienta interna de bajo tráfico, espere costos inf
 Para eliminar todos los recursos y dejar de incurrir en costos:
 
 ```bash
-cdk destroy --app "python cdk/app.py"
+cdk destroy --app "python cdk/app.py" [--profile profilename]
 ```
 
 Esto eliminará todos los recursos creados por el stack. Tenga en cuenta que la tabla de auditoría de DynamoDB y el bucket de logs de S3 tienen `RemovalPolicy.RETAIN` y no se eliminarán automáticamente — elimínelos manualmente desde la consola de AWS si ya no los necesita.
